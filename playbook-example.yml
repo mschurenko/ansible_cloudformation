@@ -1,0 +1,52 @@
+---
+# This is a contrived example that demonstrates creating two stacks
+# Notes:
+# - S3Bucket uses an in-line stack policy which can be overrided by setting policy_overrice to 'yes'
+# - S3BucketPolicy has a dependency on the physical id of the bucket created by S3Bucket. This id is referenced via the cf_resource lookup
+
+- name: Create S3 bucket
+  hosts: localhost
+
+  tasks:
+    - name: s3 template
+      template:
+        src: jinja_templates/s3_bucket.yml.j2
+        dest: rendered_templates/s3_bucket.yml
+
+    - name: s3 stack
+      tags: bucket
+      cloudformation:
+        state: "{{ stack_state | default('create') }}"
+        template: rendered_templates/s3_bucket.yml
+        stack_name: S3Bucket
+        stack_policy_override: "{{ policy_override | default(false) }}"
+        stack_policy:
+          Statement:
+            - Effect: "{% if policy_override is defined and policy_override == 'yes' %}Allow{% else %}Deny{% endif %}"
+              Action: [ "Update:Delete", "Update:Replace" ]
+              Principal: "*"
+              Resource: "*"
+
+            - Effect: Allow
+              Action: "Update:*"
+              Principal: "*"
+              Resource: "*"
+
+- name: Create bucket policy
+  hosts: localhost
+
+  vars:
+    bucket_name: "{{ lookup('cf_resource', 'S3Bucket/MyS3Bucket') }}" # the s3 bucket name is referenced from the logical id in the S3Bucket stack
+
+  tasks:
+    - name: policy template
+      template:
+        src: jinja_templates/s3_policy.yml.j2
+        dest: rendered_templates/s3_policy.yml
+
+    - name: policy stack
+      tags: policy
+      cloudformation:
+        state: "{{ stack_state | default('create') }}"
+        template: rendered_templates/s3_policy.yml
+        stack_name: S3BucketPolicy

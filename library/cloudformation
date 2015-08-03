@@ -1,0 +1,356 @@
+#!/usr/bin/python
+
+#---------------------------------------------------------------
+# This has been forked from ansible-modulues-core
+#---------------------------------------------------------------
+
+import os
+import json
+import ruamel.yaml
+import time
+import re
+
+try:
+    import boto
+    import boto.cloudformation.connection
+    HAS_BOTO = True
+except ImportError:
+    HAS_BOTO = False
+
+
+def boto_exception(err):
+    '''generic error message handler'''
+    if hasattr(err, 'error_message'):
+        error = err.error_message
+    elif hasattr(err, 'message'):
+        error = err.message
+    else:
+        error = '%s: %s' % (Exception, err)
+
+    return error
+
+
+def boto_version_required(version_tuple):
+    parts = boto.Version.split('.')
+    boto_version = []
+    try:
+        for part in parts:
+            boto_version.append(int(part))
+    except:
+        boto_version.append(-1)
+    return tuple(boto_version) >= tuple(version_tuple)
+
+
+def stack_operation(cfn, stack_name, operation):
+    '''gets the status of a stack while it is created/updated/deleted'''
+    existed = []
+    result = {}
+    operation_complete = False
+    while operation_complete == False:
+        try:
+            stack = invoke_with_throttling_retries(cfn.describe_stacks, stack_name)[0]
+            existed.append('yes')
+        except:
+            if 'yes' in existed:
+                result = dict(changed=True,
+                              output='Stack Deleted',
+                              events=map(str, list(stack.describe_events())))
+            else:
+                result = dict(changed= True, output='Stack Not Found')
+            break
+        if '%s_COMPLETE' % operation == stack.stack_status:
+            result = dict(changed=True,
+                          events = map(str, list(stack.describe_events())),
+                          output = 'Stack %s complete' % operation)
+            break
+        if 'ROLLBACK_COMPLETE' == stack.stack_status or '%s_ROLLBACK_COMPLETE' % operation == stack.stack_status:
+            result = dict(changed=True, failed=True,
+                          events = map(str, list(stack.describe_events())),
+                          output = 'Problem with %s. Rollback complete' % operation)
+            break
+        if False:
+            pass
+        elif '%s_FAILED' % operation == stack.stack_status:
+            result = dict(changed=True, failed=True,
+                          events = map(str, list(stack.describe_events())),
+                          output = 'Stack %s failed' % operation)
+            break
+        else:
+            time.sleep(5)
+    return result
+
+IGNORE_CODE = 'Throttling'
+MAX_RETRIES=3
+def invoke_with_throttling_retries(function_ref, *argv):
+    retries=0
+    while True:
+        try:
+            retval=function_ref(*argv)
+            return retval
+        except boto.exception.BotoServerError, e:
+            if e.code != IGNORE_CODE or retries==MAX_RETRIES:
+                raise e
+        time.sleep(5 * (2**retries))
+        retries += 1
+
+def set_stack_policies(cfn, module, stack_name, stack_policy_body):
+    try:
+        cfn.set_stack_policy(stack_name, stack_policy_body=stack_policy_body)
+    except Exception, err:
+        error_msg = boto_exception(err)
+        module.fail_json(msg=error_msg)
+    return True
+
+def manage_stack_policies(cfn, module, stack_name, stack_policy_body, update=None):
+    current_policy = cfn.get_stack_policy(stack_name)
+    if current_policy:
+        if json.loads(current_policy) == json.loads(stack_policy_body):
+            changed = False
+        else:
+            changed = True
+    else:
+        changed = True
+
+    set_stack_policies(cfn, module, stack_name, stack_policy_body)
+
+    if update:
+        return (changed, current_policy)
+    else:
+        return changed
+
+def main():
+    argument_spec = ec2_argument_spec()
+    argument_spec.update(dict(
+            stack_name=dict(required=True),
+            template_parameters=dict(required=False, type='dict', default={}),
+            state=dict(default='create', choices=['create', 'update', 'delete', 'pass', 'compare']),
+            template=dict(default=None, required=False),
+            stack_policy_override=dict(default=False, required=False, type='bool'),
+            stack_policy=dict(default=None, required=False),
+            disable_rollback=dict(default=False, type='bool'),
+            template_url=dict(default=None, required=False),
+            s3_bucket=dict(default=None, required=False),
+            tags=dict(default=None)
+        )
+    )
+
+    module = AnsibleModule(
+        argument_spec=argument_spec,
+        mutually_exclusive=[['template_url', 'template']]
+    )
+
+
+    if not HAS_BOTO:
+        module.fail_json(msg='boto required for this module')
+
+    state = module.params['state']
+    stack_name = module.params['stack_name']
+
+    # validate stack_name
+    if not re.search('^[a-zA-z][a-zA-Z0-9\-]+$', stack_name):
+        module.fail_json(msg='Stack name "%s" is invalid. Stack names must contain only alphanumeric characters and hyphens and must start with an alphabetic character.' % stack_name)
+
+    if len(stack_name) > 255:
+        module.fail_json(msg='Stack name "%s" exceeds 255 character limit' % stack_name)
+    
+    if state == 'pass':
+        module.exit_json(output='doing nothing', change=False)
+
+    if module.params['template'] is None and module.params['template_url'] is None:
+        if state == 'create' or state == 'update':
+            module.fail_json(msg='Module parameter "template" or "template_url" is required if "state" is "create" or "update"')
+
+    disable_rollback = module.params['disable_rollback']
+    template_parameters = module.params['template_parameters']
+    tags = module.params['tags']
+    region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
+    template_url = module.params['template_url']
+    stack_policy_override = module.params['stack_policy_override']
+    result = {}
+    
+    if module.params['template'] is not None:
+        if module.params['template'].endswith('.yml') or module.params['template'].endswith('.yaml'):
+            yaml_body = open(module.params['template'], 'r').read()
+            yd = ruamel.yaml.load(yaml_body, ruamel.yaml.RoundTripLoader)
+            template_body = json.dumps(yd, indent=2)
+        else:
+            template_body = open(module.params['template'], 'r').read()
+        template_json = template_body
+
+        # check size of template
+        max_template_body = 51200
+        bucket_prefix = 'cf-'
+
+        if len(template_body) >= max_template_body:
+
+            import hashlib
+            from boto.s3.connection import S3Connection
+            from boto.s3.key import Key
+
+            s3_conn = S3Connection()
+            m = hashlib.md5()
+            m.update(s3_conn.aws_access_key_id)
+
+            if module.params['s3_bucket']:
+                bucket_name = module.params['s3_bucket'].split('/')[-1]
+                s3_url = module.params['s3_bucket']
+            else:
+                bucket_name = bucket_prefix + m.hexdigest() + '-' + region
+                s3_url = 'https://s3.amazonaws.com/' + bucket_name
+
+            if s3_conn.lookup(bucket_name): 
+                bucket = s3_conn.get_bucket(bucket_name) 
+            else:
+                bucket = s3_conn.create_bucket(bucket_name,location=region) 
+
+            bucket = s3_conn.get_bucket(bucket_name) 
+
+            s3_k = Key(bucket)
+            key = re.sub('\.(yml|yaml)$', '.json', os.path.split(module.params['template'])[-1])
+            s3_k.key = key
+            s3_k.set_contents_from_string(template_body)
+            template_url = s3_url + '/' + key
+            template_json = template_body
+            template_body = None
+
+    else:
+        template_body = None
+
+    if module.params['stack_policy'] is not None:
+        stack_policy = module.params['stack_policy']
+    else:
+        stack_policy = None
+
+    kwargs = dict()
+    if tags is not None:
+        if not boto_version_required((2,6,0)):
+            module.fail_json(msg='Module parameter "tags" requires at least Boto version 2.6.0')
+        kwargs['tags'] = tags
+
+    # convert the template parameters ansible passes into a tuple for boto
+    template_parameters_tup = [(k, v) for k, v in template_parameters.items()]
+    stack_outputs = {}
+
+    try:
+        cfn = boto.cloudformation.connect_to_region(
+                  region,
+                  **aws_connect_kwargs
+              )
+    except boto.exception.NoAuthHandlerFound, e:
+        module.fail_json(msg=str(e))
+
+    operation = None
+
+    # create stack policy body
+    if stack_policy:
+        stack_policy_body = json.dumps(stack_policy)
+    else:
+        stack_policy_body=None
+
+    # main if
+    if state == 'compare':
+        new_file = os.path.join('/tmp', stack_name.lower() + '_new.json')
+        current_file = os.path.join('/tmp', stack_name.lower() + '_current.json')
+        fh = open(new_file, 'w')
+        fh.write(str(template_json))
+        fh.close()
+
+        fh = open(current_file, 'w')
+        try:
+            current_body = cfn.get_template(stack_name)['GetTemplateResponse']['GetTemplateResult']['TemplateBody']
+        except boto.exception.BotoServerError, e:
+            module.fail_json(msg=str(e))
+
+        fh.write(current_body)
+        fh.close()
+
+        module.exit_json(output={'Run the following command to compare current template with new one': 'vimdiff -o %s %s' % (new_file, current_file)})
+
+    if state == 'create':
+        # check if stack_name exists
+        try:
+            cfn.describe_stacks(stack_name)
+            result = dict(changed=False, output='Stack %s already exists' % stack_name)
+        except Exception, err:
+            error_msg = boto_exception(err)
+            if 'does not exist' in error_msg:
+                # create stack
+                cfn.create_stack(stack_name, parameters=template_parameters_tup, template_body=template_body, template_url=template_url, disable_rollback=disable_rollback, capabilities=['CAPABILITY_IAM'], **kwargs)
+                result = dict(changed=True)
+                operation = 'CREATE'
+                if stack_policy:
+                    # wait until CREATE_COMPLETE
+                    stack_operation(cfn, stack_name, operation)
+                    sp_changed = manage_stack_policies(cfn, module, stack_name, stack_policy_body)
+                result = stack_operation(cfn, stack_name, operation)
+            else:
+                module.fail_json(output='unexpected boto error message %s' % str(error_msg))
+
+    elif state == 'update':
+        # update stack
+        operation = 'UPDATE'
+        updated = False
+        try:
+            if stack_policy:
+                sp_changed, current_policy = manage_stack_policies(cfn, module, stack_name, stack_policy_body, update=True)
+            cfn.update_stack(stack_name, parameters=template_parameters_tup, template_body=template_body, disable_rollback=disable_rollback, template_url=template_url, capabilities=['CAPABILITY_IAM'])
+            updated = True
+        except Exception, err:
+          error_msg = boto_exception(err)
+          if 'No updates are to be performed' in error_msg:
+              result = dict(changed=False, output='Stack is already up-to-date.')
+              if stack_policy and sp_changed:
+                result = dict(changed=sp_changed, output='Stack policy updated')
+          else:
+            module.fail_json(msg=error_msg)
+
+        if updated:
+            result = stack_operation(cfn, stack_name, operation)
+
+        if stack_policy and sp_changed:
+            if current_policy and stack_policy_override:
+                set_stack_policies(cfn, module, stack_name, current_policy)
+
+    # CHECK STATUS
+    if state == 'create' or state == 'update':
+        stack = invoke_with_throttling_retries(cfn.describe_stacks,stack_name)[0]
+        for output in stack.outputs:
+            stack_outputs[output.key] = output.value
+        result['stack_outputs'] = stack_outputs
+
+    # absent state is different because of the way delete_stack works.
+    # problem is it it doesn't give an error if stack isn't found
+    # so must describe the stack first
+
+    if state == 'delete':
+        try:
+            invoke_with_throttling_retries(cfn.describe_stacks,stack_name)
+            operation = 'DELETE'
+        except Exception, err:
+            error_msg = boto_exception(err)
+            if 'Stack:%s does not exist' % stack_name in error_msg:
+                result = dict(changed=False, output='Stack not found.')
+            else:
+                module.fail_json(msg=error_msg)
+        if operation == 'DELETE':
+            cfn.delete_stack(stack_name)
+            result = stack_operation(cfn, stack_name, operation)
+
+    # delete s3 key if exists and add s3 bucket name to output
+    try:
+        s3_k
+        try:
+            result['s3_bucket_in_use'] = s3_url
+            s3_k.delete()
+        except:
+            pass
+    except NameError:
+        pass
+
+    module.exit_json(**result)
+
+# import module snippets
+from ansible.module_utils.basic import *
+from ansible.module_utils.ec2 import *
+
+main()

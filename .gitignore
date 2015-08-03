@@ -1,0 +1,5 @@
+*.swp
+*.pyc
+.DS_Store
+rendered_templates/*
+!rendered_templates/README

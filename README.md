@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 This will install Ansible, boto and a couple other python dependencies. It you are installing Ansible a different way then maybe exclude that from the requirements.txt or cherry pick the modules that you need from it.
 
-<b>Note:</b>I don't know if Ansible 2.x will work with any of this. There's a great chance it won't. It is advisable to just stick with the latest stable version of 1.9.x. (If you install Ansible via the requirements.txt file then you don't have to worry about this.)
+<b>Note:</b> I don't know if Ansible 2.x will work with any of this. There's a great chance it won't. It is advisable to just stick with the latest stable version of 1.9.x. (If you install Ansible via the requirements.txt file then you don't have to worry about this.)
 
 You will need to have some AWS access keys with suitable permisions. I export my AWS access keys via the following environment variables:
 
@@ -126,8 +126,6 @@ Will return a comma delimited string containing the subnet IDs from a CloudForma
 <b>cf_output</b>
 
 This works the same way as cf_resource except it references keys in stack outputs rather than logical IDs.
-
-More information on using/developing custom Lookups and filters can be found at http://docs.ansible.com/ansible/developing_plugins.html
 
 <b>get_azs</b>
 

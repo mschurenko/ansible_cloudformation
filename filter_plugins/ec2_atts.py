@@ -45,6 +45,13 @@ def eip_allocid(ip,region=None):
   ec2 = GetRegion()
   regions = ec2.get_regions() 
 
+  if not ip:
+      raise errors.AnsibleError('An ip address is required.')
+
+  m = re.search('^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$', ip)
+  if not m:
+      raise errors.AnsibleError('"%s" is not a valid ip address.' % ip)
+
   if region:
     region = region
   else:
@@ -62,10 +69,6 @@ def eip_allocid(ip,region=None):
     eip_allocid = ec2.get_all_addresses(filters={'public-ip': ip})[0].allocation_id
   except Exception, e:
     raise errors.AnsibleError('Couldn\'t retrieve eip allocation id. Error was %s' % str(e))
-
-  m = re.search('^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$', ip)
-  if not m:
-      raise errors.AnsibleError('"%s" is not a valid ip address.' % ip)
 
   return eip_allocid
 

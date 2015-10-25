@@ -249,22 +249,33 @@ def main():
 
     # main if
     if state == 'compare':
-        new_file = os.path.join('/tmp', stack_name.lower() + '_new.json')
-        current_file = os.path.join('/tmp', stack_name.lower() + '_current.json')
-        fh = open(new_file, 'w')
-        fh.write(str(template_json))
-        fh.close()
-
-        fh = open(current_file, 'w')
         try:
             current_body = cfn.get_template(stack_name)['GetTemplateResponse']['GetTemplateResult']['TemplateBody']
         except boto.exception.BotoServerError, e:
             module.fail_json(msg=str(e))
 
+        # compare template_json to current_body
+        if json.loads(current_body) == json.loads(template_json):
+            module.exit_json(output=('No differences between current stack and new template.'), changed=False)
+
+        new_file = os.path.join('/tmp', stack_name.lower() + '_new.json')
+        current_file = os.path.join('/tmp', stack_name.lower() + '_current.json')
+
+        fh = open(new_file, 'w')
+        fh.write(str(template_json))
+        fh.close()
+
+        fh = open(current_file, 'w')
         fh.write(current_body)
         fh.close()
 
-        module.exit_json(output={'Run the following command to compare current template with new one': 'vimdiff -o %s %s' % (new_file, current_file)})
+        module.exit_json(
+            diff_cmd=(
+            'sublimerge %s %s'
+            % (new_file, current_file)
+            ),
+            changed=True
+        )
 
     if state == 'create':
         # check if stack_name exists

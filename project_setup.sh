@@ -2,9 +2,10 @@
 
 # setup ansible working directory for a cloudformation project
 
-set -x
-
-[[ $# -ne 1 ]] && exit 1
+if [[ $# -ne 1 ]];then
+  echo "usage: $0 <target directory>"
+  exit 1
+fi
 
 target_dir=$1
 

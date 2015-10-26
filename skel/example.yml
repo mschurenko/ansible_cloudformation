@@ -1,0 +1,14 @@
+---
+- name: # example playbook
+  hosts: localhost
+  vars:
+    stack_template: includes/stack.yml
+    stack_prefix: # stack-prefix
+    team_tag: # team
+    region: # us-west-2
+
+  tasks:
+    - include: "{{ stack_template }}"
+      tags: # tag
+      vars:
+        # some vars

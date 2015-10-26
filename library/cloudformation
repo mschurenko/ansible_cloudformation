@@ -130,7 +130,8 @@ def main():
             disable_rollback=dict(default=False, type='bool'),
             template_url=dict(default=None, required=False),
             s3_bucket=dict(default=None, required=False),
-            tags=dict(default=None)
+            tags=dict(default=None),
+            diff_command=dict(default='diff')
         )
     )
 
@@ -166,6 +167,7 @@ def main():
     region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
     template_url = module.params['template_url']
     stack_policy_override = module.params['stack_policy_override']
+    diff_command = module.params['diff_command']
     result = {}
     
     if module.params['template'] is not None:
@@ -271,8 +273,8 @@ def main():
 
         module.exit_json(
             diff_cmd=(
-            'sublimerge %s %s'
-            % (new_file, current_file)
+            '%s %s %s'
+            % (diff_command, new_file, current_file)
             ),
             changed=True
         )

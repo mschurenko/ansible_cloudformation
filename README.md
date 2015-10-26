@@ -3,20 +3,22 @@ Some Ansible modules and plugins that make CloudFormation easier to work with.
 
 Inspired by http://www.unixdaemon.net/cloud/ansible-expand-cloudformation-templates.html
 
-Setup
+Installation
 =====
 
-Clone this repo into what will be your Ansible working directory:
+Clone this repo somehwere
 ```sh
 git clone https://github.com/mschurenko/ansible_cloudformation.git && cd ansible_cloudformation
 ```
 
 Run:
 ```sh
-pip install -r requirements.txt 
+./install.sh
 ```
 
-This will install Ansible, boto and a couple other python dependencies. It you are installing Ansible a different way then maybe exclude that from the requirements.txt or cherry pick the modules that you need from it.
+This will do a few things:
+
+- installs Ansible, boto and a couple other python dependencies. It you are installing Ansible a different way then maybe exclude that from the requirements.txt or cherry pick the modules that you need from it.
 
 <b>Note:</b> I don't know if Ansible 2.x will work with any of this. There's a great chance it won't. It is advisable to just stick with the latest stable version of 1.9.x. (If you install Ansible via the requirements.txt file then you don't have to worry about this.)
 
@@ -29,12 +31,24 @@ AWS_SECRET_ACCESS_KEY=<my_secret_key>
 
 Under the hood it's all boto so any way you mange your keys for boto should work here too.
 
+- installs filter_plugins, lookup_plugins and library under /usr/local/ansible_cloudformation by default (install directory can be overriden by settig env variable $BASE_DIR).
+
+- adds a ~/.ansible.cfg that is specific for use with this project. (if ~/.ansible.cfg already exists it will not be overrideen unless the -f flag is passed to install.sh)
+
+Starting a new project
+=====
+```sh
+./project_setup.sh <project_dir>
+
+This will setup the <project_dir> directory so that it is ready to start a new CloudFormation project. Rename example.yml and start from there.
+```
+
 Usage
 =====
 
-Create/run your Ansible playbooks from this directory. Example:
+cd to your project direcory and run:
 ```sh
-ansible-playbook playbook-example.yml
+ansible-playbook your_playbook.yml
 ```
 
 cloudformation module

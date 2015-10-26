@@ -1,0 +1,23 @@
+- name: Render Template
+  template: src=jinja_templates/{{ template }} dest=rendered_templates/{{ template | replace(".j2", "") }}
+
+- name: Manage CloudFormation Stack
+  cloudformation:
+    state: "{{ stack_state | default('create') }}"
+    stack_name: "{{ stack_prefix ~ '-' ~ name }}"
+    tags:
+      team: "{{ team_tag }}"
+    template: rendered_templates/{{ template | regex_replace("\.j2$","") }}
+    diff_command: "{{ diff_command | default('sub_diff') }}" 
+    stack_policy_override: "{{ policy_override | default(false) }}"
+    stack_policy:
+      Statement:
+        - Effect: "{% if policy_override is defined and policy_override == 'yes' %}Allow{% else %}Deny{% endif %}"
+          Action: [ "Update:Delete", "Update:Replace" ]
+          Principal: "*"
+          Resource: "*"
+
+        - Effect: Allow
+          Action: "Update:*"
+          Principal: "*"
+          Resource: "*"

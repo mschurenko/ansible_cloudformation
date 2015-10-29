@@ -43,6 +43,6 @@ else
     create_config  
   else
     echo "Error: ~/.ansible.cfg already exists. not going to overwrite it unless -f flag is set."
+    exit 1
   fi
-exit 1
 fi

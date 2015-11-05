@@ -32,6 +32,7 @@ echo 'localhost' > ${base_dir}/hosts
 cp -r library $base_dir
 cp -r filter_plugins $base_dir
 cp -r lookup_plugins $base_dir
+cp -r custom_utils $base_dir
 
 echo "Creating ~/.ansible.cfg ..."
 if ! [[ -f ~/.ansible.cfg ]];then
@@ -42,7 +43,6 @@ else
     mv ~/.ansible.cfg{,.orig.$$}
     create_config  
   else
-    echo "Error: ~/.ansible.cfg already exists. not going to overwrite it unless -f flag is set."
+    echo "Warning: ~/.ansible.cfg already exists. not going to overwrite it unless -f flag is set."
   fi
-exit 1
 fi

@@ -9,21 +9,27 @@ import os
 import sys
 from boto.sts import STSConnection
 
-# region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
-
 def boto_supports_profile_name():
     return hasattr(boto.ec2.EC2Connection, 'profile_name')
 
+def config_section_map(config, section):
+    dict1 = {}
+    options = config.options(section)
+    for option in options:
+        try:
+            dict1[option] = config.get(section, option)
+        except:
+            dict1[option] = None
+    return dict1
+
 
 def get_aws_connection_info(module):
-  # Check module args for credentials, then check environment vars
-    # access_key
     ec2_url = module.params.get('ec2_url')
     access_key = module.params.get('aws_access_key')
     secret_key = module.params.get('aws_secret_key')
     security_token = module.params.get('security_token')
     region = module.params.get('region')
-    iam_profile = module.params.get('iam_profile')
+    aws_profile = module.params.get('aws_profile')
     validate_certs = module.params.get('validate_certs')
 
     if not ec2_url:
@@ -43,7 +49,7 @@ def get_aws_connection_info(module):
             if not region:
                 region = boto.config.get('Boto', 'ec2_region')
 
-    if iam_profile and iam_profile != "default":
+    if aws_profile and aws_profile != "default":
         # sanity checks
         if "HOME" not in os.environ:
             module.fail_json(msg="No $HOME environment variable could be detected. Do you even UNIX bro?")
@@ -55,36 +61,21 @@ def get_aws_connection_info(module):
         # parse $HOME/.aws/config
         role_session_name = 'CustomAnsibleSession'
 
-        def config_section_map(section):
-            dict1 = {}
-            options = config.options(section)
-            for option in options:
-                try:
-                    dict1[option] = config.get(section, option)
-                    if dict1[option] == -1:
-                        print("skip: %s" % option)
-                except:
-                    print("exception on %s!" % option)
-                    dict1[option] = None
-            return dict1
 
         config = ConfigParser.ConfigParser()
         config.read(aws_config_file)
 
-        def check_values(profile_dict):
-            if 'source_profile' not in profile_dict:
-                module.fail_json(msg="source_profile must exist in %s section of ini file" % iam_profile)
-            if 'role_arn' not in profile_dict:
-                module.fail_json(msg="role_arn must exist in %s section of ini file" % iam_profile)
-
         sections = config.sections()
 
-        if 'profile ' + iam_profile not in sections:
-            module.fail_json(msg="IAM profile: %s was not found" % iam_profile)
+        if 'profile ' + aws_profile not in sections:
+            module.fail_json(msg="IAM profile: %s was not found" % aws_profile)
 
-        profile_dict = config_section_map('profile ' + iam_profile)
+        profile_dict = config_section_map(config, 'profile ' + aws_profile)
 
-        check_values(profile_dict)
+        if 'source_profile' not in profile_dict:
+            module.fail_json(msg="source_profile must exist in %s section of ini file" % aws_profile)
+        if 'role_arn' not in profile_dict:
+            module.fail_json(msg="role_arn must exist in %s section of ini file" % aws_profile)
 
         role_arn = profile_dict['role_arn']
         source_profile = profile_dict['source_profile']
@@ -96,7 +87,7 @@ def get_aws_connection_info(module):
 
         config.read(aws_credentials_file)
 
-        source_profile_dict = config_section_map(source_profile)
+        source_profile_dict = config_section_map(config, source_profile)
 
         aws_access_key = source_profile_dict['aws_access_key_id']
         aws_secret_key = source_profile_dict['aws_secret_access_key']

@@ -1,17 +1,9 @@
 - name: Render Template
   template: src=jinja_templates/{{ template }} dest=rendered_templates/{{ template | replace(".j2", "") }}
 
-- name: Assume Role
-  sts_assume_role:
-    role_arn: "{{ role_arn }}"
-    role_session_name: "{{ role_session_name }}"
-  register: assumed_role
-
 - name: Manage CloudFormation Stack
   cloudformation:
-    aws_access_key: "{{ assumed_role.sts_creds.access_key }}"
-    aws_secret_key: "{{ assumed_role.sts_creds.secret_key }}"
-    security_token: "{{ assumed_role.sts_creds.session_token }}"
+    iam_profile: "{{ profile | default(None) }}"
     state: "{{ stack_state | default('create') }}"
     stack_name: "{{ stack_prefix ~ '-' ~ name }}"
     tags:

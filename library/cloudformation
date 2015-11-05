@@ -1,14 +1,20 @@
 #!/usr/bin/python
 
-#---------------------------------------------------------------
-# This has been forked from ansible-modulues-core
-#---------------------------------------------------------------
+'''
+This has been forked from ansible-modulues-core
+'''
 
 import os
 import json
 import ruamel.yaml
 import time
 import re
+import sys
+
+
+
+# contstant(s)
+MAX_TEMPLATE_BODY = 51200
 
 try:
     import boto
@@ -80,18 +86,21 @@ def stack_operation(cfn, stack_name, operation):
     return result
 
 IGNORE_CODE = 'Throttling'
-MAX_RETRIES=3
+MAX_RETRIES = 3
+
+
 def invoke_with_throttling_retries(function_ref, *argv):
-    retries=0
+    retries = 0
     while True:
         try:
-            retval=function_ref(*argv)
+            retval = function_ref(*argv)
             return retval
         except boto.exception.BotoServerError, e:
-            if e.code != IGNORE_CODE or retries==MAX_RETRIES:
+            if e.code != IGNORE_CODE or retries == MAX_RETRIES:
                 raise e
         time.sleep(5 * (2**retries))
         retries += 1
+
 
 def set_stack_policies(cfn, module, stack_name, stack_policy_body):
     try:
@@ -100,6 +109,7 @@ def set_stack_policies(cfn, module, stack_name, stack_policy_body):
         error_msg = boto_exception(err)
         module.fail_json(msg=error_msg)
     return True
+
 
 def manage_stack_policies(cfn, module, stack_name, stack_policy_body, update=None):
     current_policy = cfn.get_stack_policy(stack_name)
@@ -118,9 +128,11 @@ def manage_stack_policies(cfn, module, stack_name, stack_policy_body, update=Non
     else:
         return changed
 
+
 def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(dict(
+            iam_profile=dict(default=None, required=False),
             stack_name=dict(required=True),
             template_parameters=dict(required=False, type='dict', default={}),
             state=dict(default='create', choices=['create', 'update', 'delete', 'pass', 'compare']),
@@ -140,7 +152,6 @@ def main():
         mutually_exclusive=[['template_url', 'template']]
     )
 
-
     if not HAS_BOTO:
         module.fail_json(msg='boto required for this module')
 
@@ -153,7 +164,7 @@ def main():
 
     if len(stack_name) > 255:
         module.fail_json(msg='Stack name "%s" exceeds 255 character limit' % stack_name)
-    
+
     if state == 'pass':
         module.exit_json(output='doing nothing', change=False)
 
@@ -169,7 +180,13 @@ def main():
     stack_policy_override = module.params['stack_policy_override']
     diff_command = module.params['diff_command']
     result = {}
-    
+
+    # debug
+    fh = open("/tmp/output", "w")
+    fh.write(str(aws_connect_kwargs))
+    fh.close()
+    # debug
+
     if module.params['template'] is not None:
         if module.params['template'].endswith('.yml') or module.params['template'].endswith('.yaml'):
             yaml_body = open(module.params['template'], 'r').read()
@@ -180,7 +197,7 @@ def main():
         template_json = template_body
 
         # check size of template
-        max_template_body = 51200
+        max_template_body = MAX_TEMPLATE_BODY
         bucket_prefix = 'cf-'
 
         if len(template_body) >= max_template_body:
@@ -200,12 +217,12 @@ def main():
                 bucket_name = bucket_prefix + m.hexdigest() + '-' + region
                 s3_url = 'https://s3.amazonaws.com/' + bucket_name
 
-            if s3_conn.lookup(bucket_name): 
-                bucket = s3_conn.get_bucket(bucket_name) 
+            if s3_conn.lookup(bucket_name):
+                bucket = s3_conn.get_bucket(bucket_name)
             else:
-                bucket = s3_conn.create_bucket(bucket_name,location=region) 
+                bucket = s3_conn.create_bucket(bucket_name, location=region)
 
-            bucket = s3_conn.get_bucket(bucket_name) 
+            bucket = s3_conn.get_bucket(bucket_name)
 
             s3_k = Key(bucket)
             key = re.sub('\.(yml|yaml)$', '.json', os.path.split(module.params['template'])[-1])
@@ -225,13 +242,19 @@ def main():
 
     kwargs = dict()
     if tags is not None:
-        if not boto_version_required((2,6,0)):
+        if not boto_version_required((2, 6, 0)):
             module.fail_json(msg='Module parameter "tags" requires at least Boto version 2.6.0')
         kwargs['tags'] = tags
 
     # convert the template parameters ansible passes into a tuple for boto
     template_parameters_tup = [(k, v) for k, v in template_parameters.items()]
     stack_outputs = {}
+
+    # debug
+    #df = open("/tmp/debug", "w")
+    #df.write(str(aws_connect_kwargs))
+    #df.close()
+    # debug
 
     try:
         cfn = boto.cloudformation.connect_to_region(
@@ -247,7 +270,7 @@ def main():
     if stack_policy:
         stack_policy_body = json.dumps(stack_policy)
     else:
-        stack_policy_body=None
+        stack_policy_body = None
 
     # main if
     if state == 'compare':
@@ -273,8 +296,8 @@ def main():
 
         module.exit_json(
             diff_cmd=(
-            '%s %s %s'
-            % (diff_command, new_file, current_file)
+                '%s %s %s'
+                % (diff_command, new_file, current_file)
             ),
             changed=True
         )
@@ -337,7 +360,7 @@ def main():
 
     if state == 'delete':
         try:
-            invoke_with_throttling_retries(cfn.describe_stacks,stack_name)
+            invoke_with_throttling_retries(cfn.describe_stacks, stack_name)
             operation = 'DELETE'
         except Exception, err:
             error_msg = boto_exception(err)
@@ -362,8 +385,14 @@ def main():
 
     module.exit_json(**result)
 
+
+# add custom ansible utils to path (very very hacky)
+custom_ansible_utils_path = "/usr/local/ansible_cloudformation/"
+sys.path.append(custom_ansible_utils_path)
+
 # import module snippets
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
+from custom_utils.ec2 import * # this overrides get_aws_connection_info from ansible.module_utils.ec2
 
 main()

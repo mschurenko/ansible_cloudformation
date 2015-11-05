@@ -53,21 +53,19 @@ def get_aws_connection_info(module):
 
     if aws_profile:
         # sanity checks
-        if "HOME" not in os.environ:
-            module.fail_json(msg="No $HOME environment variable could be detected. Do you even UNIX bro?")
-
-        aws_config_file = os.path.join(os.environ["HOME"], ".aws/config")
-        if not os.path.exists(aws_config_file):
-            module.fail_json(msg="Does $HOME/aws/.config even exist?")
-
-        # parse $HOME/.aws/config
-
-        config = ConfigParser.ConfigParser()
-        config.read(aws_config_file)
-
-        sections = config.sections()
-
         if aws_profile != "default":
+            if "HOME" not in os.environ:
+                module.fail_json(msg="No $HOME environment variable could be detected. Do you even UNIX bro?")
+
+            aws_config_file = os.path.join(os.environ["HOME"], ".aws/config")
+            if not os.path.exists(aws_config_file):
+                module.fail_json(msg="Does $HOME/aws/.config even exist?")
+
+            config = ConfigParser.ConfigParser()
+            config.read(aws_config_file)
+
+            sections = config.sections()
+
             if 'profile ' + aws_profile not in sections:
                 module.fail_json(msg="AWS profile: %s was not found" % aws_profile)
 

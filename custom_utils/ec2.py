@@ -32,6 +32,8 @@ def get_aws_connection_info(module):
     aws_profile = module.params.get('aws_profile')
     validate_certs = module.params.get('validate_certs')
 
+    profile_dict = {}
+
     if not ec2_url:
         if 'EC2_URL' in os.environ:
             ec2_url = os.environ['EC2_URL']
@@ -49,7 +51,7 @@ def get_aws_connection_info(module):
             if not region:
                 region = boto.config.get('Boto', 'ec2_region')
 
-    if aws_profile and aws_profile != "default":
+    if aws_profile:
         # sanity checks
         if "HOME" not in os.environ:
             module.fail_json(msg="No $HOME environment variable could be detected. Do you even UNIX bro?")
@@ -59,26 +61,24 @@ def get_aws_connection_info(module):
             module.fail_json(msg="Does $HOME/aws/.config even exist?")
 
         # parse $HOME/.aws/config
-        role_session_name = 'CustomAnsibleSession'
-
 
         config = ConfigParser.ConfigParser()
         config.read(aws_config_file)
 
         sections = config.sections()
 
-        if 'profile ' + aws_profile not in sections:
-            module.fail_json(msg="IAM profile: %s was not found" % aws_profile)
+        if aws_profile != "default":
+            if 'profile ' + aws_profile not in sections:
+                module.fail_json(msg="AWS profile: %s was not found" % aws_profile)
 
-        profile_dict = config_section_map(config, 'profile ' + aws_profile)
+            profile_dict = config_section_map(config, 'profile ' + aws_profile)
+    else:
+        aws_profile = None
 
-        if 'source_profile' not in profile_dict:
-            module.fail_json(msg="source_profile must exist in %s section of ini file" % aws_profile)
-        if 'role_arn' not in profile_dict:
-            module.fail_json(msg="role_arn must exist in %s section of ini file" % aws_profile)
-
+    if profile_dict and 'role_arn' in profile_dict:
         role_arn = profile_dict['role_arn']
         source_profile = profile_dict['source_profile']
+        role_session_name = 'CustomAnsibleSession'
 
         # get creds by following source_profile
         aws_credentials_file = os.path.join(os.environ["HOME"], ".aws/credentials")
@@ -103,7 +103,6 @@ def get_aws_connection_info(module):
         security_token = assumedRoleObject.credentials.session_token
 
     else:
-
         if not access_key:
             if 'EC2_ACCESS_KEY' in os.environ:
                 access_key = os.environ['EC2_ACCESS_KEY']
@@ -135,6 +134,7 @@ def get_aws_connection_info(module):
 
     boto_params = dict(aws_access_key_id=access_key,
                        aws_secret_access_key=secret_key,
+                       profile_name=aws_profile,
                        security_token=security_token)
 
     return region, ec2_url, boto_params

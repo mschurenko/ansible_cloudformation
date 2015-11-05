@@ -3,6 +3,7 @@
 
 - name: Manage CloudFormation Stack
   cloudformation:
+    aws_profile: "{{ aws_profile | default(None) }}"
     state: "{{ stack_state | default('create') }}"
     stack_name: "{{ stack_prefix ~ '-' ~ name }}"
     tags:

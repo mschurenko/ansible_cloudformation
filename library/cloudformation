@@ -132,7 +132,7 @@ def manage_stack_policies(cfn, module, stack_name, stack_policy_body, update=Non
 def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(dict(
-            iam_profile=dict(default=None, required=False),
+            aws_profile=dict(default=None, required=False),
             stack_name=dict(required=True),
             template_parameters=dict(required=False, type='dict', default={}),
             state=dict(default='create', choices=['create', 'update', 'delete', 'pass', 'compare']),
